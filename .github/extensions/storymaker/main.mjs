@@ -346,7 +346,7 @@ session = await joinSession({
         {
             name: "storymaker",
             description: "Open Storymaker — weave a collaborative story from two local Ollama models.",
-            handler: webview.show,
+            handler: () => webview.show(),
         },
     ],
     hooks: { onSessionEnd: webview.close },
