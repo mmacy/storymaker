@@ -66,6 +66,23 @@
         </div>
       </div>
 
+      <div class="conclude-row" id="conclude-row">
+        <label class="check">
+          <input type="checkbox" id="concludeToggle" checked />
+          <span>Let Author A write a conclusion</span>
+        </label>
+        <label class="field small conclude-len">
+          <span class="field-label">Length</span>
+          <select id="concludeMultiplier">
+            <option value="1">1×</option>
+            <option value="2" selected>2×</option>
+            <option value="3">3×</option>
+            <option value="4">4×</option>
+          </select>
+        </label>
+        <span id="conclude-hint" class="hint"></span>
+      </div>
+
       <p id="status" class="status" role="status"></p>
     </section>
 

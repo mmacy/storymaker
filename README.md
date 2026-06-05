@@ -9,6 +9,7 @@ Storymaker is a [GitHub Copilot CLI](https://github.com/github/copilot-cli) exte
 ## Features
 
 - 🤝 **Two-author collaboration** — Author A writes a configurable number of sentences, Author B continues, and they alternate for as many turns as you choose.
+- 🏁 **Optional conclusion** — on by default, the opening author (Author A) wraps up the story with a closing passage of configurable length (1×–4× the per-turn sentence count, default 2×).
 - 🧠 **Full shared context** — every turn, each author receives the *entire* story so far, so the narrative stays coherent as it grows.
 - 🎛️ **Pick any installed model per author** — both dropdowns are populated from your local Ollama models; mix and match (e.g. `qwen3.5` + `gemma4`).
 - ⚡ **Live token streaming** — text appears word-by-word with a blinking caret, color-coded by author.
@@ -70,8 +71,9 @@ This opens the Storymaker window. Then:
 1. **Enter starter text** — the opening of your story.
 2. **Choose a model** for Author A and Author B.
 3. Set **sentences per turn** (1–10) and **number of turns** (1–25).
-4. Click **Weave story** and watch the two authors collaborate.
-5. **Copy** or **Save** the finished story (saved files land in the repo root by default).
+4. Optionally let **Author A write a conclusion** (on by default) and pick its length (1×–4× the per-turn sentence count).
+5. Click **Weave story** and watch the two authors collaborate.
+6. **Copy** or **Save** the finished story (saved files land in the repo root by default).
 
 > The agent can also open and drive the window via the `storymaker_show`, `storymaker_eval`, and `storymaker_close` tools.
 
@@ -82,7 +84,9 @@ This opens the Storymaker window. Then:
 | Ollama endpoint | `OLLAMA_HOST` env var | `http://localhost:11434` |
 | Sentences per turn | UI | 2 (range 1–10) |
 | Number of turns | UI | 3 (range 1–25) |
-| Window size | `main.mjs` (`width`/`height`) | 1040 × 820 |
+| Conclusion | UI | On |
+| Conclusion length | UI | 2× sentences-per-turn (range 1×–4×) |
+| Window size | `main.mjs` (`width`/`height`) | 1588 × 1280 (physical px) |
 
 ## Project structure
 

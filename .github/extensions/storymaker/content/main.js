@@ -9,6 +9,10 @@ const els = {
   modelB: $("modelB"),
   sentences: $("sentences"),
   turns: $("turns"),
+  concludeToggle: $("concludeToggle"),
+  concludeMultiplier: $("concludeMultiplier"),
+  concludeRow: $("conclude-row"),
+  concludeHint: $("conclude-hint"),
   weave: $("weave"),
   stop: $("stop"),
   status: $("status"),
@@ -69,7 +73,13 @@ function refreshOutputButtons() {
 // Build a segment block. `meta` = { kind:'starter'|'author', participant, model, turn, totalTurns }
 function addSegmentBlock(meta) {
   const seg = document.createElement("div");
-  seg.className = "segment " + (meta.kind === "starter" ? "starter" : "author-" + meta.participant);
+  if (meta.kind === "starter") {
+    seg.className = "segment starter";
+  } else if (meta.kind === "conclusion") {
+    seg.className = "segment conclusion author-" + meta.participant;
+  } else {
+    seg.className = "segment author-" + meta.participant;
+  }
 
   const metaRow = document.createElement("div");
   metaRow.className = "seg-meta";
@@ -81,6 +91,8 @@ function addSegmentBlock(meta) {
   const chipLabel = document.createElement("span");
   if (meta.kind === "starter") {
     chipLabel.textContent = "Starter";
+  } else if (meta.kind === "conclusion") {
+    chipLabel.textContent = `Conclusion · Author ${meta.participant}`;
   } else {
     chipLabel.textContent = `Turn ${meta.turn}/${meta.totalTurns} · Author ${meta.participant}`;
   }
@@ -118,10 +130,10 @@ function setCaret(segIndex, on) {
 // ---- live update protocol (extension -> page) ----------------------------
 
 window.sm = {
-  onSegmentStart({ index, participant, model, turn, totalTurns }) {
+  onSegmentStart({ index, kind, participant, model, turn, totalTurns }) {
     hideEmptyState();
     const { segEl, textEl } = addSegmentBlock({
-      kind: "author",
+      kind: kind || "author",
       participant,
       model,
       turn,
@@ -130,7 +142,11 @@ window.sm = {
     state.segments.set(index, { segEl, textEl, plain: "" });
     state.activeIndex = index;
     setCaret(index, true);
-    setStatus(`Turn ${turn} of ${totalTurns} · Author ${participant} (${model}) is writing…`);
+    if (kind === "conclusion") {
+      setStatus(`Author ${participant} (${model}) is writing the conclusion…`);
+    } else {
+      setStatus(`Turn ${turn} of ${totalTurns} · Author ${participant} (${model}) is writing…`);
+    }
     autoScroll(true);
   },
 
@@ -226,6 +242,24 @@ function setGenerating(on) {
   els.modelB.disabled = on;
   els.sentences.disabled = on;
   els.turns.disabled = on;
+  els.concludeToggle.disabled = on;
+  els.concludeMultiplier.disabled = on || !els.concludeToggle.checked;
+}
+
+// Reflect the conclusion settings: enable/disable the length picker and show the
+// resulting sentence count (multiplier × sentences per turn).
+function updateConcludeHint() {
+  const on = els.concludeToggle.checked;
+  els.concludeMultiplier.disabled = on ? false : true;
+  els.concludeRow.classList.toggle("off", !on);
+  let s = parseInt(els.sentences.value, 10);
+  if (!Number.isFinite(s)) s = 2;
+  s = Math.min(10, Math.max(1, s));
+  const m = parseInt(els.concludeMultiplier.value, 10) || 2;
+  const n = s * m;
+  els.concludeHint.textContent = on
+    ? `Author A ends the story with ${n} sentence${n === 1 ? "" : "s"}.`
+    : "No conclusion — the story ends on Author B's last turn.";
 }
 
 function clampInput(input, min, max, fallback) {
@@ -242,6 +276,8 @@ async function weave() {
   const modelB = els.modelB.value;
   const sentences = clampInput(els.sentences, 1, 10, 2);
   const turns = clampInput(els.turns, 1, 25, 3);
+  const conclude = els.concludeToggle.checked;
+  const concludeMultiplier = parseInt(els.concludeMultiplier.value, 10) || 2;
 
   if (!starter) {
     setStatus("Please enter some starter text first.", "error");
@@ -264,7 +300,7 @@ async function weave() {
   setStatus("Warming up the authors…");
 
   try {
-    const res = await copilot.generateStory({ starter, modelA, modelB, sentences, turns });
+    const res = await copilot.generateStory({ starter, modelA, modelB, sentences, turns, conclude, concludeMultiplier });
     if (res && res.ok) {
       setStatus("Story complete. You can copy or save it.", "ok");
     } else if (res && res.stopped) {
@@ -340,5 +376,9 @@ els.weave.addEventListener("click", weave);
 els.stop.addEventListener("click", stop);
 els.copy.addEventListener("click", copyStory);
 els.save.addEventListener("click", saveStory);
+els.concludeToggle.addEventListener("change", updateConcludeHint);
+els.concludeMultiplier.addEventListener("change", updateConcludeHint);
+els.sentences.addEventListener("input", updateConcludeHint);
 
+updateConcludeHint();
 loadModels();

@@ -140,6 +140,19 @@ textarea:focus, select:focus, input:focus {
 .grow { flex: 1 1 auto; }
 .actions { display: flex; gap: 0.5rem; }
 
+.conclude-row { display: flex; align-items: flex-end; gap: 0.9rem; flex-wrap: wrap; }
+.conclude-row.off { opacity: 0.65; }
+.check {
+  display: flex; align-items: center; gap: 0.5rem;
+  font-size: 0.88rem; color: var(--text); cursor: pointer; user-select: none;
+  padding-bottom: 0.5rem;
+}
+.check input[type="checkbox"] {
+  width: 16px; height: 16px; cursor: pointer; accent-color: var(--orange);
+}
+.conclude-len, .field.conclude-len { width: 78px; }
+.hint { font-size: 0.8rem; color: var(--text-dim); padding-bottom: 0.55rem; }
+
 .btn {
   font: inherit; font-weight: 700;
   border: 1px solid transparent;
@@ -220,6 +233,13 @@ textarea:focus, select:focus, input:focus {
 
 .segment.starter .seg-chip { border-color: rgba(255, 255, 255, 0.2); color: var(--text-dim); }
 .segment.starter .swatch { background: var(--text-dim); }
+
+.segment.conclusion {
+  border-top: 1px solid var(--border);
+  margin-top: 1.6rem;
+  padding-top: 1.35rem;
+}
+.segment.conclusion .seg-chip { font-style: normal; }
 
 .seg-text {
   font-family: Georgia, "Iowan Old Style", "Times New Roman", serif;

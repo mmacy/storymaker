@@ -116,6 +116,26 @@ function buildPrompt(story, sentences) {
     );
 }
 
+function buildConcludeSystem(label, sentences) {
+    const s = sentences === 1 ? "sentence" : "sentences";
+    return (
+        `You are ${label}, the author bringing a collaborative story to its end. ` +
+        `Write exactly ${sentences} ${s} of vivid narrative prose that conclude the story — resolving its central tension ` +
+        `and giving it a satisfying, definitive ending. Continue seamlessly from exactly where the story leaves off, ` +
+        `preserving the established characters, setting, tense, point of view, and tone. Do not restate or summarize earlier text. ` +
+        `Output only the concluding prose — no headings, labels, author names, lists, surrounding quotation marks, or commentary.`
+    );
+}
+
+function buildConcludePrompt(story, sentences) {
+    const s = sentences === 1 ? "sentence" : "sentences";
+    return (
+        `The story so far:\n\n${story}\n\n` +
+        `Now write the ending: exactly ${sentences} ${s} that continue seamlessly from the final sentence above ` +
+        `and bring the story to a satisfying close. Prose only.`
+    );
+}
+
 // ---- Generation state ----------------------------------------------------
 
 let busy = false;
@@ -138,7 +158,7 @@ async function push(method, payload) {
     }
 }
 
-async function generateStory({ starter, modelA, modelB, sentences, turns }) {
+async function generateStory({ starter, modelA, modelB, sentences, turns, conclude, concludeMultiplier }) {
     if (busy) return { ok: false, error: "A story is already being woven." };
     busy = true;
     const abort = new AbortController();
@@ -147,6 +167,8 @@ async function generateStory({ starter, modelA, modelB, sentences, turns }) {
     starter = String(starter ?? "").trim();
     sentences = clampInt(sentences, 1, 10, 2);
     turns = clampInt(turns, 1, 25, 3);
+    conclude = conclude === undefined ? true : !!conclude;
+    concludeMultiplier = clampInt(concludeMultiplier, 1, 4, 2);
 
     try {
         if (!starter) throw new Error("Please provide some starter text to begin the story.");
@@ -159,6 +181,25 @@ async function generateStory({ starter, modelA, modelB, sentences, turns }) {
             { key: "B", label: "Author B", model: modelB },
         ];
 
+        // Streams one segment, pushing coalesced token deltas to the page.
+        const streamSegment = async (segIndex, model, system, prompt, effSentences) => {
+            let segText = "";
+            let pending = "";
+            const flush = async () => {
+                if (!pending) return;
+                const text = pending;
+                pending = "";
+                await push("onToken", { index: segIndex, text });
+            };
+            for await (const piece of streamChat({ model, system, prompt, sentences: effSentences, signal: abort.signal })) {
+                segText += piece;
+                pending += piece;
+                if (pending.length >= 16) await flush();
+            }
+            await flush();
+            return segText.trim();
+        };
+
         for (let turn = 1; turn <= turns; turn++) {
             for (const author of authors) {
                 if (abort.signal.aborted) throw new Error("__stopped__");
@@ -166,38 +207,20 @@ async function generateStory({ starter, modelA, modelB, sentences, turns }) {
                 const segIndex = index;
                 await push("onSegmentStart", {
                     index: segIndex,
+                    kind: "author",
                     participant: author.key,
                     model: author.model,
                     turn,
                     totalTurns: turns,
                 });
 
-                const system = buildSystem(author.label, sentences);
-                const prompt = buildPrompt(story, sentences);
-
-                let segText = "";
-                let pending = "";
-                const flush = async () => {
-                    if (!pending) return;
-                    const text = pending;
-                    pending = "";
-                    await push("onToken", { index: segIndex, text });
-                };
-
-                for await (const piece of streamChat({
-                    model: author.model,
-                    system,
-                    prompt,
+                const segText = await streamSegment(
+                    segIndex,
+                    author.model,
+                    buildSystem(author.label, sentences),
+                    buildPrompt(story, sentences),
                     sentences,
-                    signal: abort.signal,
-                })) {
-                    segText += piece;
-                    pending += piece;
-                    if (pending.length >= 16) await flush();
-                }
-                await flush();
-
-                segText = segText.trim();
+                );
                 if (!segText) {
                     await push("onSegmentEmpty", { index: segIndex });
                 } else {
@@ -205,6 +228,35 @@ async function generateStory({ starter, modelA, modelB, sentences, turns }) {
                 }
                 await push("onSegmentEnd", { index: segIndex });
             }
+        }
+
+        // The opening author (Author A) wraps up the story.
+        if (conclude) {
+            if (abort.signal.aborted) throw new Error("__stopped__");
+            const author = authors[0];
+            const concludeSentences = Math.min(40, sentences * concludeMultiplier);
+            index += 1;
+            const segIndex = index;
+            await push("onSegmentStart", {
+                index: segIndex,
+                kind: "conclusion",
+                participant: author.key,
+                model: author.model,
+            });
+
+            const segText = await streamSegment(
+                segIndex,
+                author.model,
+                buildConcludeSystem(author.label, concludeSentences),
+                buildConcludePrompt(story, concludeSentences),
+                concludeSentences,
+            );
+            if (!segText) {
+                await push("onSegmentEmpty", { index: segIndex });
+            } else {
+                story += `\n\n${segText}`;
+            }
+            await push("onSegmentEnd", { index: segIndex });
         }
 
         await push("onComplete", {});

@@ -32,6 +32,7 @@ Page (Chromium webview)  ──WebSocket──►  Extension (Node, main.mjs)  �
 
 - `generateStory({ starter, modelA, modelB, sentences, turns })` runs the whole loop and returns `{ ok, fullText }`. It is the **authoritative** source of story text.
 - A running `story` string accumulates the starter plus every segment. **Each turn sends the full story so far** to the model (`buildPrompt`), so authors always have complete context. Keep this — partial context degrades coherence.
+- **Conclusion step:** after the turn loop, if `conclude` is set (default true), the *opening* author (`authors[0]`, Author A) writes a closing segment of `sentences × concludeMultiplier` (1–4, default 2) sentences using `buildConcludeSystem`/`buildConcludePrompt`. It is pushed with `kind: "conclusion"` and included in `story`.
 - Streaming: `streamChat` reads Ollama's newline-delimited JSON stream, yields `message.content` deltas, and **ignores `message.thinking`** so reasoning never leaks into the story.
 - Requests send `think: false` to disable reasoning, with a fallback that retries without the flag if a model rejects it. Preserve both paths.
 - Live UI updates are pushed via `push(method, payload)` → `webview.eval`. **All payloads are `JSON.stringify`-encoded** and the page renders text with `textContent` (never `innerHTML`). Do not interpolate raw model text into eval strings or HTML.
