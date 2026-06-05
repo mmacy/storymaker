@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Storymaker</title>
+<link rel="stylesheet" href="style.css" />
+<!-- /__bridge.js exposes window.copilot. Must load before main.js uses it. -->
+<script src="/__bridge.js"></script>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand-mark" aria-hidden="true">
+        <svg viewBox="0 0 40 40" width="34" height="34">
+          <path d="M4 26 C 10 8, 16 8, 20 20 S 30 32, 36 14" fill="none"
+                stroke="url(#smwave)" stroke-width="4" stroke-linecap="round" />
+          <defs>
+            <linearGradient id="smwave" x1="0" y1="0" x2="40" y2="0">
+              <stop offset="0" stop-color="#F8991C" />
+              <stop offset="1" stop-color="#FFB85C" />
+            </linearGradient>
+          </defs>
+        </svg>
+      </span>
+      <div class="brand-text">
+        <h1>Storymaker</h1>
+        <p>Two local minds, one collaborative story.</p>
+      </div>
+    </div>
+    <div id="ollama-status" class="pill" title="Ollama connection">Connecting…</div>
+  </header>
+
+  <main class="layout">
+    <!-- Setup panel -->
+    <section class="panel setup" aria-label="Story setup">
+      <label class="field">
+        <span class="field-label">Starter text</span>
+        <textarea id="starter" rows="4" placeholder="The lighthouse had been dark for thirty years, until the night it wasn't…"></textarea>
+      </label>
+
+      <div class="authors">
+        <label class="field author author-a">
+          <span class="field-label"><i class="dot"></i> Author A model</span>
+          <select id="modelA"><option value="">Loading…</option></select>
+        </label>
+        <label class="field author author-b">
+          <span class="field-label"><i class="dot"></i> Author B model</span>
+          <select id="modelB"><option value="">Loading…</option></select>
+        </label>
+      </div>
+
+      <div class="numbers">
+        <label class="field small">
+          <span class="field-label">Sentences per turn</span>
+          <input id="sentences" type="number" min="1" max="10" value="2" />
+        </label>
+        <label class="field small">
+          <span class="field-label">Number of turns</span>
+          <input id="turns" type="number" min="1" max="25" value="3" />
+        </label>
+        <div class="grow"></div>
+        <div class="actions">
+          <button id="weave" class="btn btn-primary">Weave story</button>
+          <button id="stop" class="btn btn-ghost" hidden>Stop</button>
+        </div>
+      </div>
+
+      <p id="status" class="status" role="status"></p>
+    </section>
+
+    <!-- Story output -->
+    <section class="panel story-panel" aria-label="Story">
+      <div class="story-head">
+        <h2>The story</h2>
+        <div class="story-actions">
+          <input id="filename" class="filename" type="text" placeholder="story.txt" spellcheck="false" />
+          <button id="save" class="btn btn-small" disabled>Save</button>
+          <button id="copy" class="btn btn-small" disabled>Copy</button>
+        </div>
+      </div>
+      <div id="story" class="story" tabindex="0">
+        <div id="empty-state" class="empty-state">
+          <p>Your collaborative story will appear here, one turn at a time.</p>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <script type="module" src="/main.js"></script>
+</body>
+</html>
