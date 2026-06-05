@@ -14,7 +14,8 @@ Storymaker is a [GitHub Copilot CLI](https://github.com/github/copilot-cli) exte
 - 🎛️ **Pick any installed model per author** — both dropdowns are populated from your local Ollama models; mix and match (e.g. `qwen3.5` + `gemma4`).
 - ⚡ **Live token streaming** — text appears word-by-word with a blinking caret, color-coded by author.
 - ⏹️ **Stop anytime** — cancel mid-generation and keep the partial story.
-- 📋 **Copy & save** — copy the finished story to the clipboard or save it to a `.txt` file.
+- 📋 **Copy & save** — copy the finished story to the clipboard, or save it to a file that begins with a YAML front matter block recording the models and settings used.
+- ⌨️ **Editing shortcuts** — select-all, copy, cut, paste, and undo work in the text fields.
 - 🎨 **Audible-inspired dark theme** — near-black canvas, signature orange accents, serif story type.
 
 ## How it works
@@ -87,6 +88,28 @@ This opens the Storymaker window. Then:
 | Conclusion | UI | On |
 | Conclusion length | UI | 2× sentences-per-turn (range 1×–4×) |
 | Window size | `main.mjs` (`width`/`height`) | 1588 × 1280 (physical px) |
+
+## Saved file format
+
+Saved stories begin with a YAML front matter block capturing how the story was generated, followed by a blank line and the story text:
+
+```yaml
+---
+title: "The venerable Mazpar awoke."
+generator: Storymaker
+created: "2026-06-04T21:12:11.611Z"
+author_a_model: "qwen3.6:35b"
+author_b_model: "gemma4:latest"
+sentences_per_turn: 2
+turns: 5
+conclusion: true
+conclusion_length: "2x"
+conclusion_sentences: 4
+ollama_host: "http://localhost:11434"
+---
+```
+
+Copying to the clipboard yields the plain story without front matter.
 
 ## Project structure
 

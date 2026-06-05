@@ -290,6 +290,16 @@ async function weave() {
   }
 
   state.starterText = starter;
+  state.meta = {
+    starter,
+    modelA,
+    modelB,
+    sentences,
+    turns,
+    conclude,
+    concludeMultiplier,
+    createdAt: new Date().toISOString(),
+  };
   clearStory();
   hideEmptyState();
   // Echo the starter immediately so it is always part of the visible story.
@@ -357,7 +367,7 @@ async function saveStory() {
   els.save.disabled = true;
   setStatus("Saving…");
   try {
-    const res = await copilot.saveStory({ filename, content });
+    const res = await copilot.saveStory({ filename, content, meta: state.meta });
     if (res && res.ok) {
       setStatus(`Saved to ${res.path}`, "ok");
     } else {
@@ -369,6 +379,58 @@ async function saveStory() {
     refreshOutputButtons();
   }
 }
+
+// ---- keyboard shortcuts --------------------------------------------------
+// This webview has no native Edit menu, so the standard editing shortcuts
+// (select-all/copy/cut/paste/undo) don't reach text fields. Wire them up here
+// using execCommand, which works within the trusted key-event gesture.
+
+function isTextField(el) {
+  if (!el) return false;
+  if (el.tagName === "TEXTAREA") return true;
+  if (el.tagName === "INPUT") {
+    const t = (el.getAttribute("type") || "text").toLowerCase();
+    return ["text", "search", "url", "email", "tel", "password", "number", ""].includes(t);
+  }
+  return false;
+}
+
+document.addEventListener("keydown", (e) => {
+  const mod = e.metaKey || e.ctrlKey;
+  if (!mod || e.altKey) return;
+  const key = e.key.toLowerCase();
+  const el = document.activeElement;
+
+  if (isTextField(el)) {
+    switch (key) {
+      case "a": e.preventDefault(); el.select(); return;
+      case "c": e.preventDefault(); document.execCommand("copy"); return;
+      case "x": e.preventDefault(); document.execCommand("cut"); return;
+      case "v": e.preventDefault(); document.execCommand("paste"); return;
+      case "z": e.preventDefault(); document.execCommand(e.shiftKey ? "redo" : "undo"); return;
+      case "y": e.preventDefault(); document.execCommand("redo"); return;
+    }
+    return;
+  }
+
+  // Outside a text field: let users select-all / copy the rendered story.
+  if (key === "a" && els.story && (el === els.story || els.story.contains(el))) {
+    e.preventDefault();
+    const range = document.createRange();
+    range.selectNodeContents(els.story);
+    const sel = window.getSelection();
+    sel.removeAllRanges();
+    sel.addRange(range);
+    return;
+  }
+  if (key === "c") {
+    const sel = window.getSelection();
+    if (sel && String(sel).length) {
+      e.preventDefault();
+      document.execCommand("copy");
+    }
+  }
+});
 
 // ---- wire up -------------------------------------------------------------
 

@@ -43,7 +43,8 @@ Page (Chromium webview)  ──WebSocket──►  Extension (Node, main.mjs)  �
 - **stdout is reserved for JSON-RPC.** Never use `console.log()` in extension code. Use `session.log(...)`.
 - Tool names are global across all loaded extensions; keep the `storymaker_` prefix to avoid collisions.
 - The page bridge buffers calls until the socket opens, so `copilot.*` is safe to call on load.
-- Saved files go to `process.cwd()` (the repo root) with a sanitized basename; existing files are auto-suffixed to avoid clobbering.
+- Saved files go to `process.cwd()` (the repo root) with a sanitized basename; existing files are auto-suffixed to avoid clobbering. Each file begins with a YAML front matter block (`buildFrontMatter`) built from the page-supplied `meta` (models + params); the clipboard copy stays plain.
+- The webview has **no native Edit menu**, so the page wires editing shortcuts (Cmd/Ctrl+A/C/X/V/Z/Y) via `document.execCommand` inside a `keydown` handler. The async Clipboard API is blocked without a user gesture in this webview, so prefer `execCommand` / `el.select()`.
 
 ## Developing & testing
 

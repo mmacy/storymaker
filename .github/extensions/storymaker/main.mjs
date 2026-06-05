@@ -274,6 +274,45 @@ async function generateStory({ starter, modelA, modelB, sentences, turns, conclu
 
 // ---- File saving ---------------------------------------------------------
 
+function yamlStr(value) {
+    return (
+        '"' +
+        String(value)
+            .replace(/\\/g, "\\\\")
+            .replace(/"/g, '\\"')
+            .replace(/[\u0000-\u001f]+/g, " ")
+            .trim() +
+        '"'
+    );
+}
+
+// Builds a YAML front matter block describing how the story was generated.
+function buildFrontMatter(meta) {
+    if (!meta || typeof meta !== "object") return "";
+    const sentences = clampInt(meta.sentences, 1, 10, 2);
+    const turns = clampInt(meta.turns, 1, 25, 3);
+    const conclude = !!meta.conclude;
+    const title = String(meta.title || meta.starter || "").split("\n")[0].trim().slice(0, 80);
+
+    const lines = ["---"];
+    if (title) lines.push(`title: ${yamlStr(title)}`);
+    lines.push("generator: Storymaker");
+    lines.push(`created: ${yamlStr(meta.createdAt || new Date().toISOString())}`);
+    lines.push(`author_a_model: ${yamlStr(meta.modelA || "")}`);
+    lines.push(`author_b_model: ${yamlStr(meta.modelB || "")}`);
+    lines.push(`sentences_per_turn: ${sentences}`);
+    lines.push(`turns: ${turns}`);
+    lines.push(`conclusion: ${conclude}`);
+    if (conclude) {
+        const mult = clampInt(meta.concludeMultiplier, 1, 4, 2);
+        lines.push(`conclusion_length: ${yamlStr(`${mult}x`)}`);
+        lines.push(`conclusion_sentences: ${Math.min(40, sentences * mult)}`);
+    }
+    lines.push(`ollama_host: ${yamlStr(OLLAMA)}`);
+    lines.push("---");
+    return lines.join("\n") + "\n\n";
+}
+
 async function uniquePath(dir, name) {
     const dot = name.lastIndexOf(".");
     const stem = dot > 0 ? name.slice(0, dot) : name;
@@ -290,7 +329,7 @@ async function uniquePath(dir, name) {
     return join(dir, `${stem}-${Date.now()}${ext}`);
 }
 
-async function saveStory({ filename, content }) {
+async function saveStory({ filename, content, meta }) {
     try {
         content = String(content ?? "");
         if (!content.trim()) throw new Error("There is no story to save yet.");
@@ -302,8 +341,11 @@ async function saveStory({ filename, content }) {
         if (name.length > 120) name = name.slice(0, 120);
         if (!/\.[a-z0-9]+$/i.test(name)) name += ".txt";
 
+        const body = content.endsWith("\n") ? content : content + "\n";
+        const fileText = buildFrontMatter(meta) + body;
+
         const target = await uniquePath(process.cwd(), name);
-        await writeFile(target, content.endsWith("\n") ? content : content + "\n", "utf8");
+        await writeFile(target, fileText, "utf8");
         await session?.log(`Storymaker saved the story to ${target}`);
         return { ok: true, path: target };
     } catch (err) {
