@@ -4,6 +4,7 @@
 import { joinSession } from "@github/copilot-sdk/extension";
 import { join, basename } from "node:path";
 import { writeFile, access } from "node:fs/promises";
+import { spawn } from "node:child_process";
 import { CopilotWebview } from "./lib/copilot-webview.js";
 
 const OLLAMA = (process.env.OLLAMA_HOST || "http://localhost:11434").replace(/\/+$/, "");
@@ -14,13 +15,46 @@ let webview;
 // ---- Ollama client -------------------------------------------------------
 
 async function listOllamaModels() {
-    const res = await fetch(`${OLLAMA}/api/tags`);
+    const res = await fetch(`${OLLAMA}/api/tags`, { signal: AbortSignal.timeout(8000) });
     if (!res.ok) throw new Error(`Ollama responded with HTTP ${res.status}`);
     const data = await res.json();
     return (data.models || [])
         .map((m) => m.name)
         .filter(Boolean)
         .sort((a, b) => a.localeCompare(b));
+}
+
+// Write text to the OS clipboard from the extension (Node) side. WKWebView's
+// in-page clipboard API is gesture-gated and unreliable, so we shell out to the
+// platform clipboard utility instead. Linux tries xclip then wl-copy.
+function osClipboardCopy(text) {
+    const candidates =
+        process.platform === "darwin" ? [["pbcopy", []]] :
+        process.platform === "win32" ? [["clip", []]] :
+        [["xclip", ["-selection", "clipboard"]], ["wl-copy", []]];
+
+    const tryOne = ([cmd, args]) =>
+        new Promise((resolve, reject) => {
+            const child = spawn(cmd, args);
+            let settled = false;
+            const done = (fn, arg) => { if (!settled) { settled = true; clearTimeout(timer); fn(arg); } };
+            const timer = setTimeout(() => {
+                try { child.kill(); } catch {}
+                done(reject, new Error(`${cmd} timed out`));
+            }, 4000);
+            child.on("error", (e) => done(reject, e));
+            child.on("close", (code) => (code === 0 ? done(resolve) : done(reject, new Error(`${cmd} exited with code ${code}`))));
+            child.stdin.on("error", () => {});
+            child.stdin.end(text);
+        });
+
+    return candidates.reduce(
+        (p, cand) => p.catch(() => tryOne(cand)),
+        Promise.reject(new Error("init"))
+    ).catch((e) => {
+        const hint = process.platform === "linux" ? " (install xclip or wl-clipboard)" : "";
+        throw new Error(`Could not access the system clipboard${hint}: ${e.message}`);
+    });
 }
 
 // Opens a streaming /api/chat response. `think` disables reasoning output so the
@@ -337,7 +371,11 @@ async function saveStory({ filename, content, meta }) {
         let name = String(filename ?? "").trim();
         name = name.replace(/[\u0000-\u001f]/g, "").replace(/[/\\]+/g, "_");
         name = basename(name).trim();
+        // Strip characters that are invalid in Windows filenames.
+        name = name.replace(/[<>:"|?*]/g, "_");
         if (!name || name === "." || name === "..") name = `story-${Date.now()}.txt`;
+        // Guard Windows reserved device names (CON, PRN, AUX, NUL, COM1-9, LPT1-9).
+        if (/^(con|prn|aux|nul|com[1-9]|lpt[1-9])(\.|$)/i.test(name)) name = `story-${name}`;
         if (name.length > 120) name = name.slice(0, 120);
         if (!/\.[a-z0-9]+$/i.test(name)) name += ".txt";
 
@@ -378,6 +416,16 @@ webview = new CopilotWebview({
             return { ok: true };
         },
         saveStory,
+        copyStory: async ({ text } = {}) => {
+            const story = String(text ?? "");
+            if (!story.trim()) return { ok: false, error: "There is no story to copy yet." };
+            try {
+                await osClipboardCopy(story);
+                return { ok: true, chars: story.length };
+            } catch (err) {
+                return { ok: false, error: err?.message || String(err) };
+            }
+        },
         log: (msg, opts) => session?.log(msg, opts),
     },
 });

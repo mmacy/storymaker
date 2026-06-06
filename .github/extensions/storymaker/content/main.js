@@ -340,23 +340,18 @@ async function stop() {
 async function copyStory() {
   const text = assembleStory();
   if (!text) return;
-  let done = false;
+  // Copy from the extension (OS clipboard) instead of the webview's in-page
+  // clipboard API, which is gesture-gated and unreliable in WKWebView.
+  let res;
   try {
-    await navigator.clipboard.writeText(text);
-    done = true;
-  } catch {
-    try {
-      const ta = document.createElement("textarea");
-      ta.value = text;
-      ta.style.position = "fixed";
-      ta.style.opacity = "0";
-      document.body.appendChild(ta);
-      ta.select();
-      done = document.execCommand("copy");
-      ta.remove();
-    } catch {}
+    res = await copilot.copyStory({ text });
+  } catch (e) {
+    res = { ok: false, error: e?.message || String(e) };
   }
-  setStatus(done ? "Story copied to clipboard." : "Couldn't access the clipboard.", done ? "ok" : "error");
+  setStatus(
+    res?.ok ? "Story copied to clipboard." : `Couldn't access the clipboard.${res?.error ? " " + res.error : ""}`,
+    res?.ok ? "ok" : "error"
+  );
 }
 
 async function saveStory() {

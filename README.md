@@ -11,7 +11,7 @@ Storymaker is a [GitHub Copilot CLI](https://github.com/github/copilot-cli) exte
 - 🤝 **Two-author collaboration** — Author A writes a configurable number of sentences, Author B continues, and they alternate for as many turns as you choose.
 - 🏁 **Optional conclusion** — on by default, the opening author (Author A) wraps up the story with a closing passage of configurable length (1×–4× the per-turn sentence count, default 2×).
 - 🧠 **Full shared context** — every turn, each author receives the *entire* story so far, so the narrative stays coherent as it grows.
-- 🎛️ **Pick any installed model per author** — both dropdowns are populated from your local Ollama models; mix and match (e.g. `qwen3.5` + `gemma4`).
+- 🎛️ **Pick any installed model per author** — both dropdowns are populated from your local Ollama models; mix and match (e.g. `llama3.2` + `qwen2.5`).
 - ⚡ **Live token streaming** — text appears word-by-word with a blinking caret, color-coded by author.
 - ⏹️ **Stop anytime** — cancel mid-generation and keep the partial story.
 - 📋 **Copy & save** — copy the finished story to the clipboard, or save it to a file that begins with a YAML front matter block recording the models and settings used.
@@ -41,11 +41,15 @@ Reasoning is disabled (`think: false`) so the models write prose directly instea
 
 - [GitHub Copilot CLI](https://github.com/github/copilot-cli)
 - [Ollama](https://ollama.com) running locally (default `http://localhost:11434`)
-- At least one pulled model, e.g.:
+- At least one pulled model — any model shown by `ollama list` works, for example:
   ```bash
-  ollama pull qwen3.5
-  ollama pull gemma4
+  ollama pull llama3.2
+  ollama pull qwen2.5
   ```
+
+> **Privacy:** By default Storymaker talks to a local Ollama instance, so your
+> starter text and the generated story stay on your machine. If you point
+> `OLLAMA_HOST` at a remote or LAN server, that text is sent there instead.
 
 ## Installation
 
