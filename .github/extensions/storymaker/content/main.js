@@ -313,8 +313,10 @@ async function weave() {
     const res = await copilot.generateStory({ starter, modelA, modelB, sentences, turns, conclude, concludeMultiplier });
     if (res && res.ok) {
       setStatus("Story complete. You can copy or save it.", "ok");
+      prefillFilename();
     } else if (res && res.stopped) {
       setStatus("Generation stopped. Partial story kept.", "");
+      prefillFilename();
     } else {
       setStatus(res?.error || "Generation failed.", "error");
     }
@@ -324,6 +326,22 @@ async function weave() {
     setGenerating(false);
     refreshOutputButtons();
   }
+}
+
+// Derive a safe default filename (alphanumeric + hyphens, .txt) from Author A's
+// model and prefill the filename box once there is a story to save.
+function slugifyModel(model) {
+  const slug = String(model || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/-{2,}/g, "-")
+    .replace(/^-+|-+$/g, "");
+  return slug || "story";
+}
+
+function prefillFilename() {
+  if (!assembleStory()) return;
+  els.filename.value = slugifyModel(state.meta?.modelA) + ".txt";
 }
 
 async function stop() {
@@ -360,11 +378,13 @@ async function saveStory() {
   let filename = els.filename.value.trim();
   if (!filename) filename = "story.txt";
   els.save.disabled = true;
-  setStatus("Saving…");
+  setStatus("Choose where to save…");
   try {
     const res = await copilot.saveStory({ filename, content, meta: state.meta });
     if (res && res.ok) {
-      setStatus(`Saved to ${res.path}`, "ok");
+      showSavedStatus(res.path);
+    } else if (res && res.canceled) {
+      setStatus("Save canceled.", "");
     } else {
       setStatus(res?.error || "Save failed.", "error");
     }
@@ -375,10 +395,40 @@ async function saveStory() {
   }
 }
 
+// Render the "Saved to <path>" status with the path as a link that reveals the
+// file in the OS file manager. The path is set via textContent (never innerHTML)
+// and the reveal happens through an extension callback, since the webview can't
+// open Finder/Explorer itself.
+function showSavedStatus(path) {
+  els.status.className = "status ok";
+  els.status.textContent = "Saved to ";
+  const link = document.createElement("a");
+  link.className = "path-link";
+  link.href = "#";
+  link.textContent = path;
+  link.title = "Reveal this file in your file manager";
+  link.addEventListener("click", async (e) => {
+    e.preventDefault();
+    let res;
+    try {
+      res = await copilot.revealPath({ path });
+    } catch (err) {
+      res = { ok: false, error: err?.message || String(err) };
+    }
+    if (!res?.ok) {
+      setStatus(`Couldn't reveal the file.${res?.error ? " " + res.error : ""}`, "error");
+    }
+  });
+  els.status.appendChild(link);
+}
+
 // ---- keyboard shortcuts --------------------------------------------------
-// This webview has no native Edit menu, so the standard editing shortcuts
-// (select-all/copy/cut/paste/undo) don't reach text fields. Wire them up here
-// using execCommand, which works within the trusted key-event gesture.
+// This webview has no native Edit menu, and its in-page clipboard (execCommand
+// copy/cut/paste, navigator.clipboard) is gesture-gated and unreliable. So copy
+// and cut route the selection to the OS clipboard through the extension, and
+// paste reads the OS clipboard and inserts it with execCommand("insertText"),
+// which keeps the field's native undo stack intact. Selection-only editing
+// commands (insertText/delete/undo/redo) do work in this webview.
 
 function isTextField(el) {
   if (!el) return false;
@@ -390,6 +440,82 @@ function isTextField(el) {
   return false;
 }
 
+async function osClipboardWrite(text) {
+  if (!text) return false;
+  try {
+    const res = await copilot.clipboardWrite({ text });
+    return !!(res && res.ok);
+  } catch {
+    return false;
+  }
+}
+
+// Returns the currently selected substring of a text field, or "" if the field
+// doesn't support the selection API (e.g. number/email inputs) or nothing is
+// selected.
+function selectedText(el) {
+  try {
+    if (typeof el.selectionStart === "number" && typeof el.selectionEnd === "number") {
+      return el.value.substring(el.selectionStart, el.selectionEnd);
+    }
+  } catch {
+    /* selection API unsupported for this input type */
+  }
+  return "";
+}
+
+function fieldCopy(el) {
+  const text = selectedText(el);
+  if (text) osClipboardWrite(text);
+}
+
+async function fieldCut(el) {
+  const text = selectedText(el);
+  if (!text) return;
+  // Only remove the selection once it's safely on the OS clipboard, and only if
+  // focus hasn't moved during the async write.
+  const ok = await osClipboardWrite(text);
+  if (!ok) {
+    setStatus("Couldn't access the clipboard.", "error");
+    return;
+  }
+  if (document.activeElement === el && !el.disabled && !el.readOnly) {
+    try { document.execCommand("delete"); } catch { /* ignore */ }
+  }
+}
+
+async function fieldPaste(el) {
+  let res;
+  try {
+    res = await copilot.clipboardRead();
+  } catch {
+    res = null;
+  }
+  if (!res || !res.ok || !res.text) return;
+  // Focus may have moved while reading the OS clipboard; only paste into the
+  // field that was active when the shortcut fired.
+  if (document.activeElement !== el || el.disabled || el.readOnly) return;
+  let inserted = false;
+  // insertText replaces the selection and integrates with the native undo stack.
+  try {
+    inserted = document.execCommand("insertText", false, res.text);
+  } catch {
+    inserted = false;
+  }
+  if (!inserted) {
+    try {
+      const start = el.selectionStart;
+      const end = el.selectionEnd;
+      if (typeof start === "number" && typeof end === "number") {
+        el.setRangeText(res.text, start, end, "end");
+        el.dispatchEvent(new Event("input", { bubbles: true }));
+      }
+    } catch {
+      /* field doesn't support programmatic insertion */
+    }
+  }
+}
+
 document.addEventListener("keydown", (e) => {
   const mod = e.metaKey || e.ctrlKey;
   if (!mod || e.altKey) return;
@@ -399,9 +525,9 @@ document.addEventListener("keydown", (e) => {
   if (isTextField(el)) {
     switch (key) {
       case "a": e.preventDefault(); el.select(); return;
-      case "c": e.preventDefault(); document.execCommand("copy"); return;
-      case "x": e.preventDefault(); document.execCommand("cut"); return;
-      case "v": e.preventDefault(); document.execCommand("paste"); return;
+      case "c": e.preventDefault(); fieldCopy(el); return;
+      case "x": e.preventDefault(); fieldCut(el); return;
+      case "v": e.preventDefault(); fieldPaste(el); return;
       case "z": e.preventDefault(); document.execCommand(e.shiftKey ? "redo" : "undo"); return;
       case "y": e.preventDefault(); document.execCommand("redo"); return;
     }
@@ -420,9 +546,10 @@ document.addEventListener("keydown", (e) => {
   }
   if (key === "c") {
     const sel = window.getSelection();
-    if (sel && String(sel).length) {
+    const text = sel ? String(sel) : "";
+    if (text) {
       e.preventDefault();
-      document.execCommand("copy");
+      osClipboardWrite(text);
     }
   }
 });
