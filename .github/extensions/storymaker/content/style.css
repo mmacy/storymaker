@@ -204,6 +204,60 @@ textarea:focus, select:focus, input:focus {
 .story-actions { display: flex; align-items: center; gap: 0.45rem; }
 .story-actions .filename { width: 150px; padding: 0.42rem 0.6rem; font-size: 0.82rem; }
 
+/* ---- Narration bar ---- */
+.narration-bar {
+  flex: 0 0 auto;
+  display: flex; align-items: center; flex-wrap: wrap; gap: 0.5rem;
+  padding: 0.6rem 1.1rem;
+  border-bottom: 1px solid var(--border-soft);
+  background: linear-gradient(180deg, rgba(248, 153, 28, 0.05), transparent);
+}
+.narration-label {
+  display: inline-flex; align-items: center; gap: 0.4rem;
+  font-size: 0.74rem; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase;
+  color: var(--text-faint);
+}
+.narration-label svg { color: var(--orange); }
+.narration-voice { width: 200px; }
+.narration-voice select { padding: 0.42rem 1.6rem 0.42rem 0.6rem; font-size: 0.82rem; }
+.narration-auto {
+  padding-bottom: 0; font-size: 0.82rem; color: var(--text-dim);
+  white-space: nowrap;
+}
+.narration-auto input[type="checkbox"] { width: 14px; height: 14px; }
+.narr-progress {
+  flex: 0 0 150px; width: 150px; height: 6px;
+  background: var(--surface-2); border: 1px solid var(--border);
+  border-radius: 999px; overflow: hidden;
+}
+.narr-progress-fill {
+  height: 100%; width: 0%;
+  background: linear-gradient(90deg, var(--orange-deep), var(--orange-soft));
+  border-radius: 999px;
+  transition: width 0.12s linear;
+}
+.narr-progress.indeterminate .narr-progress-fill {
+  width: 35%;
+  animation: narr-indet 1.1s ease-in-out infinite;
+  transition: none;
+}
+@keyframes narr-indet {
+  0% { transform: translateX(-110%); }
+  100% { transform: translateX(330%); }
+}
+.narration-status {
+  flex: 1 1 160px; min-width: 0;
+  font-size: 0.8rem; color: var(--text-dim);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.narration-status.ok { color: #76d39a; }
+.narration-status.error { color: var(--danger); }
+.narration-status .path-link {
+  color: var(--orange-soft); text-decoration: underline; text-underline-offset: 2px;
+  cursor: pointer; word-break: break-all;
+}
+.narration-status .path-link:hover { color: var(--orange); }
+
 .story {
   flex: 1 1 auto;
   min-height: 0;

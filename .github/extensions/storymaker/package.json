@@ -2,7 +2,9 @@
   "private": true,
   "type": "module",
   "dependencies": {
+    "@huggingface/transformers": "^3.5.1",
     "@webviewjs/webview": "^0.1.4",
+    "kokoro-js": "^1.2.1",
     "ws": "^8.18.0"
   }
 }

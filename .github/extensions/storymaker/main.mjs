@@ -6,6 +6,7 @@ import { join, basename, dirname } from "node:path";
 import { writeFile, readFile, mkdir, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { spawn } from "node:child_process";
+import { createHash } from "node:crypto";
 import { CopilotWebview } from "./lib/copilot-webview.js";
 
 const OLLAMA = (process.env.OLLAMA_HOST || "http://localhost:11434").replace(/\/+$/, "");
@@ -23,14 +24,20 @@ async function loadState() {
     }
 }
 
-async function saveStatePatch(patch) {
-    try {
-        const next = { ...(await loadState()), ...patch };
-        await mkdir(STATE_DIR, { recursive: true });
-        await writeFile(STATE_FILE, JSON.stringify(next, null, 2), "utf8");
-    } catch (err) {
-        await session?.log(`Storymaker: could not persist state (${err?.message || err}).`);
-    }
+// Serialize state writes so concurrent patches (lastVoice, autoNarrate,
+// lastSaveDir) can't clobber each other via interleaved read-modify-write.
+let stateWriteChain = Promise.resolve();
+function saveStatePatch(patch) {
+    stateWriteChain = stateWriteChain.then(async () => {
+        try {
+            const next = { ...(await loadState()), ...patch };
+            await mkdir(STATE_DIR, { recursive: true });
+            await writeFile(STATE_FILE, JSON.stringify(next, null, 2), "utf8");
+        } catch (err) {
+            await session?.log(`Storymaker: could not persist state (${err?.message || err}).`);
+        }
+    });
+    return stateWriteChain;
 }
 
 // Spawns a command and resolves { code, stdout, stderr }. Never rejects except on
@@ -184,17 +191,24 @@ async function isDirectory(dir) {
 
 // Show the platform's native "Save As" dialog and resolve the chosen absolute
 // path, or null if the user cancels. macOS uses osascript, Windows uses a
-// PowerShell SaveFileDialog, Linux tries zenity then kdialog.
-async function osSaveDialog({ defaultName, defaultDir }) {
+// PowerShell SaveFileDialog, Linux tries zenity then kdialog. `title` labels the
+// dialog and `kind` ("text" | "audio") picks the file-type filter where the
+// platform supports one.
+async function osSaveDialog({ defaultName, defaultDir, title = "Save story", kind = "text" }) {
     const name = String(defaultName || "story.txt");
     let dir = String(defaultDir || "");
     if (!(await isDirectory(dir))) dir = "";
+
+    const winFilter = kind === "audio"
+        ? "WAV audio (*.wav)|*.wav|All files (*.*)|*.*"
+        : "Text files (*.txt)|*.txt|All files (*.*)|*.*";
+    const linuxPattern = kind === "audio" ? "*.wav" : "*.txt";
 
     if (process.platform === "darwin") {
         const esc = (s) => s.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
         const loc = dir ? ` default location POSIX file "${esc(dir)}"` : "";
         const script =
-            `set theFile to choose file name with prompt "Save story" default name "${esc(name)}"${loc}\n` +
+            `set theFile to choose file name with prompt "${esc(title)}" default name "${esc(name)}"${loc}\n` +
             `POSIX path of theFile`;
         const r = await runCapture("osascript", ["-e", script], { timeout: 300000 });
         if (r.code === 0) return r.stdout.trim() || null;
@@ -208,8 +222,8 @@ async function osSaveDialog({ defaultName, defaultDir }) {
         const script =
             "Add-Type -AssemblyName System.Windows.Forms;" +
             "$d = New-Object System.Windows.Forms.SaveFileDialog;" +
-            `$d.Title = 'Save story';$d.FileName = '${q(name)}';${initDir}` +
-            "$d.Filter = 'Text files (*.txt)|*.txt|All files (*.*)|*.*';$d.OverwritePrompt = $true;" +
+            `$d.Title = '${q(title)}';$d.FileName = '${q(name)}';${initDir}` +
+            `$d.Filter = '${q(winFilter)}';$d.OverwritePrompt = $true;` +
             "if ($d.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) { [Console]::Out.Write($d.FileName) } else { exit 2 }";
         const r = await runCapture("powershell", ["-NoProfile", "-STA", "-Command", script], { timeout: 300000 });
         if (r.code === 0) return r.stdout.trim() || null;
@@ -219,8 +233,8 @@ async function osSaveDialog({ defaultName, defaultDir }) {
 
     const base = dir ? `${dir.replace(/\/+$/, "")}/${name}` : name;
     const candidates = [
-        ["zenity", ["--file-selection", "--save", "--confirm-overwrite", "--title=Save story", `--filename=${base}`]],
-        ["kdialog", ["--getsavefilename", base, "*.txt"]],
+        ["zenity", ["--file-selection", "--save", "--confirm-overwrite", `--title=${title}`, `--filename=${base}`]],
+        ["kdialog", ["--getsavefilename", base, linuxPattern]],
     ];
     let lastErr;
     for (const [cmd, args] of candidates) {
@@ -353,6 +367,11 @@ function buildConcludePrompt(story, sentences) {
 
 let busy = false;
 let currentAbort = null;
+
+// Narration runs independently of story generation (it reads a finished story
+// aloud), so it has its own busy flag and abort controller.
+let narrating = false;
+let narrationAbort = null;
 
 function clampInt(value, min, max, fallback) {
     const n = Math.round(Number(value));
@@ -619,6 +638,253 @@ async function saveStory({ filename, content, meta }) {
     }
 }
 
+// ---- Kokoro narration ----------------------------------------------------
+// Text-to-speech runs entirely in the extension (like the Ollama loop): the
+// page never touches the model. kokoro-js loads the 82M Kokoro model via
+// onnxruntime-node and synthesizes 24 kHz mono audio on the CPU. The model is
+// loaded lazily on first narration and the download is cached under
+// ~/.storymaker/models so it survives `npm install`/reinstalls.
+
+const TTS_MODEL_ID = "onnx-community/Kokoro-82M-v1.0-ONNX";
+const TTS_DTYPE = "q8"; // ~103 MB; good quality/size tradeoff for narration.
+const TTS_SAMPLE_RATE = 24000;
+const DEFAULT_VOICE = "af_heart";
+
+// A curated, friendly subset of Kokoro's voices (the engine still accepts any of
+// its 28 voice ids). Ordered best-first within each accent/gender group.
+const VOICES = [
+    { id: "af_heart", label: "Heart · US female ★" },
+    { id: "af_bella", label: "Bella · US female" },
+    { id: "af_nicole", label: "Nicole · US female" },
+    { id: "af_aoede", label: "Aoede · US female" },
+    { id: "af_kore", label: "Kore · US female" },
+    { id: "af_sarah", label: "Sarah · US female" },
+    { id: "am_michael", label: "Michael · US male" },
+    { id: "am_puck", label: "Puck · US male" },
+    { id: "am_fenrir", label: "Fenrir · US male" },
+    { id: "am_onyx", label: "Onyx · US male" },
+    { id: "bf_emma", label: "Emma · UK female" },
+    { id: "bf_isabella", label: "Isabella · UK female" },
+    { id: "bm_george", label: "George · UK male" },
+    { id: "bm_fable", label: "Fable · UK male" },
+];
+
+let ttsPromise = null; // memoized KokoroTTS instance (load once).
+let kokoroModulePromise = null; // memoized dynamic import of kokoro-js.
+
+function loadKokoro() {
+    if (!kokoroModulePromise) kokoroModulePromise = import("kokoro-js");
+    return kokoroModulePromise;
+}
+
+// Load (and cache) the Kokoro model. `onStatus(text)` receives coarse progress
+// while the model downloads/initializes on first use.
+async function getTTS(onStatus) {
+    if (ttsPromise) return ttsPromise;
+    ttsPromise = (async () => {
+        const [{ KokoroTTS }, { env }] = await Promise.all([
+            loadKokoro(),
+            import("@huggingface/transformers"),
+        ]);
+        // Persist the model download outside node_modules so it isn't wiped on
+        // reinstall. Non-fatal if it can't be set (falls back to the default).
+        try {
+            const modelsDir = join(STATE_DIR, "models");
+            await mkdir(modelsDir, { recursive: true });
+            env.cacheDir = modelsDir;
+        } catch {}
+        let lastPct = -1;
+        const progress_callback = (p) => {
+            if (!onStatus || !p) return;
+            if (p.status === "progress" && Number.isFinite(p.progress)) {
+                const pct = Math.floor(p.progress);
+                if (pct >= lastPct + 5) {
+                    lastPct = pct;
+                    onStatus(`Downloading narration voice model… ${pct}%`, pct);
+                }
+            }
+        };
+        onStatus?.("Loading narration voice model…");
+        return KokoroTTS.from_pretrained(TTS_MODEL_ID, {
+            dtype: TTS_DTYPE,
+            device: "cpu",
+            progress_callback,
+        });
+    })().catch((err) => {
+        ttsPromise = null; // allow a later retry after a failed load
+        throw err;
+    });
+    return ttsPromise;
+}
+
+// Encode mono float32 PCM samples as a 16-bit WAV file (Buffer).
+function floatsToWav(samples, sampleRate) {
+    const n = samples.length;
+    const buf = Buffer.alloc(44 + n * 2);
+    buf.write("RIFF", 0, "ascii");
+    buf.writeUInt32LE(36 + n * 2, 4);
+    buf.write("WAVE", 8, "ascii");
+    buf.write("fmt ", 12, "ascii");
+    buf.writeUInt32LE(16, 16); // PCM fmt chunk size
+    buf.writeUInt16LE(1, 20); // audio format = PCM
+    buf.writeUInt16LE(1, 22); // channels = mono
+    buf.writeUInt32LE(sampleRate, 24);
+    buf.writeUInt32LE(sampleRate * 2, 28); // byte rate
+    buf.writeUInt16LE(2, 32); // block align
+    buf.writeUInt16LE(16, 34); // bits per sample
+    buf.write("data", 36, "ascii");
+    buf.writeUInt32LE(n * 2, 40);
+    for (let i = 0; i < n; i++) {
+        let s = Math.max(-1, Math.min(1, samples[i]));
+        s = s < 0 ? s * 0x8000 : s * 0x7fff;
+        buf.writeInt16LE(s | 0, 44 + i * 2);
+    }
+    return buf;
+}
+
+function narrationKey(text, voice) {
+    return createHash("sha1").update(`${voice}\n${text}`).digest("hex");
+}
+
+// Holds the most recently synthesized narration so "Save audio" can write it
+// without the page re-sending several MB of base64 back to the extension.
+let lastNarration = null; // { key, wav: Buffer, durationSec }
+
+// Synthesize `text` with `voice`, pre-splitting into sentences and pushing each
+// sentence's audio to the page as base64 WAV (window.sm.onNarrationChunk) with a
+// running total for the progress bar. The full WAV is retained in `lastNarration`
+// only on full success (not when stopped) so a stopped/partial run can't be
+// saved. `requestId` is echoed in every pushed event so the page can ignore
+// events from a superseded run. Returns { ok, requestId, key, durationSec }.
+async function narrate({ text, voice, requestId } = {}) {
+    text = String(text ?? "").trim();
+    voice = String(voice || DEFAULT_VOICE);
+    const rid = requestId;
+    const pushN = (method, payload) => push(method, { ...payload, requestId: rid });
+    if (!text) return { ok: false, error: "There is no story to narrate yet.", requestId: rid };
+    if (narrating) return { ok: false, error: "Narration is already in progress.", requestId: rid };
+
+    narrating = true;
+    const abort = new AbortController();
+    narrationAbort = abort;
+    const key = narrationKey(text, voice);
+    const chunks = []; // Float32Array per sentence, for the saved full WAV
+    let stopped = false;
+
+    try {
+        await pushN("onNarrationStatus", { message: "Preparing narration…" });
+        const [tts, { TextSplitterStream }] = await Promise.all([
+            getTTS((message, loadProgress) => pushN("onNarrationStatus", { message, loadProgress })),
+            loadKokoro(),
+        ]);
+        if (abort.signal.aborted) throw new Error("__stopped__");
+
+        // Pre-split into sentences so the total is known up front (for the
+        // progress bar) and to avoid the streaming splitter's open-stream hang.
+        const splitter = new TextSplitterStream();
+        splitter.push(text);
+        splitter.close();
+        const sentences = [];
+        for await (const sent of splitter) {
+            const s = String(sent).trim();
+            if (s) sentences.push(s);
+        }
+
+        await pushN("onNarrationStart", { voice, total: sentences.length });
+        for (let i = 0; i < sentences.length; i++) {
+            if (abort.signal.aborted) { stopped = true; break; }
+            const audio = await tts.generate(sentences[i], { voice });
+            // Re-check after the (non-abortable) generate so a stop during the
+            // final sentence doesn't fall through as a successful run.
+            if (abort.signal.aborted) { stopped = true; break; }
+            const hasAudio = !!audio?.audio?.length;
+            if (hasAudio) chunks.push(audio.audio);
+            // Push one event per sentence (null WAV for a silent/empty sentence)
+            // so the page's progress reaches total even when a sentence is empty.
+            const wavBase64 = hasAudio ? Buffer.from(audio.toWav()).toString("base64") : null;
+            await pushN("onNarrationChunk", { seq: i, total: sentences.length, wavBase64 });
+        }
+
+        if (stopped) return { ok: false, stopped: true, requestId: rid };
+
+        // Concatenate every sentence into one WAV for saving/replay. Only retain
+        // it on full success so a stopped/partial run is never saveable.
+        const total = chunks.reduce((a, c) => a + c.length, 0);
+        if (total > 0) {
+            const all = new Float32Array(total);
+            let off = 0;
+            for (const c of chunks) { all.set(c, off); off += c.length; }
+            const wav = floatsToWav(all, TTS_SAMPLE_RATE);
+            const durationSec = total / TTS_SAMPLE_RATE;
+            lastNarration = { key, wav, durationSec };
+            await saveStatePatch({ lastVoice: voice });
+            return { ok: true, requestId: rid, key, durationSec };
+        }
+
+        return { ok: false, error: "The narrator produced no audio for this story.", requestId: rid };
+    } catch (err) {
+        const wasStopped = abort.signal.aborted || err?.message === "__stopped__";
+        const message = wasStopped
+            ? "Narration stopped."
+            : `Narration failed: ${err?.message || err}`;
+        await pushN("onNarrationError", { message, stopped: wasStopped });
+        return { ok: false, error: message, stopped: wasStopped, requestId: rid };
+    } finally {
+        narrating = false;
+        narrationAbort = null;
+    }
+}
+
+// Sanitize a user-supplied download name and force the given extension.
+function safeFilename(name, ext, fallbackStem) {
+    let n = String(name ?? "").replace(/[\u0000-\u001f]/g, "").replace(/[/\\]+/g, "_");
+    n = basename(n).trim().replace(/[<>:"|?*]/g, "_");
+    if (!n || n === "." || n === "..") n = `${fallbackStem}-${Date.now()}`;
+    if (/^(con|prn|aux|nul|com[1-9]|lpt[1-9])(\.|$)/i.test(n)) n = `${fallbackStem}-${n}`;
+    if (n.length > 120) n = n.slice(0, 120);
+    n = n.replace(/\.[a-z0-9]+$/i, "");
+    return `${n}.${ext}`;
+}
+
+// Write the most recent narration to a WAV file via the native Save dialog.
+async function saveAudio({ filename, key } = {}) {
+    try {
+        if (!lastNarration?.wav?.length) {
+            return { ok: false, error: "Narrate the story first, then save the audio." };
+        }
+        // Guard against saving audio that no longer matches what the page shows
+        // (e.g. a later run changed it). The page passes the key it last cached.
+        if (key && lastNarration.key !== key) {
+            return { ok: false, error: "The narration audio is out of date — generate it again." };
+        }
+        const name = safeFilename(filename || "narration.wav", "wav", "narration");
+
+        const state = await loadState();
+        let defaultDir = state.lastSaveDir ? String(state.lastSaveDir) : "";
+        if (!(await isDirectory(defaultDir))) defaultDir = process.cwd();
+
+        let target;
+        try {
+            target = await osSaveDialog({
+                defaultName: name,
+                defaultDir,
+                title: "Save narration audio",
+                kind: "audio",
+            });
+        } catch (err) {
+            return { ok: false, error: `Could not open the save dialog: ${err?.message || err}` };
+        }
+        if (!target) return { ok: false, canceled: true };
+
+        await writeFile(target, lastNarration.wav);
+        await saveStatePatch({ lastSaveDir: dirname(target) });
+        await session?.log(`Storymaker saved narration audio to ${target}`);
+        return { ok: true, path: target };
+    } catch (err) {
+        return { ok: false, error: err?.message || String(err) };
+    }
+}
+
 // ---- Wire up the webview + session --------------------------------------
 
 webview = new CopilotWebview({
@@ -643,6 +909,29 @@ webview = new CopilotWebview({
             if (currentAbort) currentAbort.abort();
             return { ok: true };
         },
+        listVoices: async () => {
+            const state = await loadState();
+            const lastVoice = VOICES.some((v) => v.id === state.lastVoice)
+                ? state.lastVoice
+                : DEFAULT_VOICE;
+            return {
+                ok: true,
+                voices: VOICES,
+                defaultVoice: DEFAULT_VOICE,
+                lastVoice,
+                autoNarrate: !!state.autoNarrate,
+            };
+        },
+        narrate,
+        cancelNarration: () => {
+            if (narrationAbort) narrationAbort.abort();
+            return { ok: true };
+        },
+        setAutoNarrate: async ({ value } = {}) => {
+            await saveStatePatch({ autoNarrate: !!value });
+            return { ok: true };
+        },
+        saveAudio,
         saveStory,
         copyStory: async ({ text } = {}) => {
             const story = String(text ?? "");

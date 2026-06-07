@@ -96,6 +96,32 @@
           <button id="copy" class="btn btn-small" disabled>Copy</button>
         </div>
       </div>
+      <div class="narration-bar">
+        <span class="narration-label" aria-hidden="true">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor"
+               stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M11 5 6 9H2v6h4l5 4z" />
+            <path d="M15.5 8.5a5 5 0 0 1 0 7" />
+            <path d="M19 5a9 9 0 0 1 0 14" />
+          </svg>
+          Narration
+        </span>
+        <label class="field narration-voice">
+          <select id="voice" title="Narrator voice"><option value="">Voice…</option></select>
+        </label>
+        <button id="narrate" class="btn btn-small" disabled>Generate audio</button>
+        <button id="narrateStop" class="btn btn-small btn-ghost" hidden>Stop</button>
+        <button id="saveAudio" class="btn btn-small" disabled>Save audio</button>
+        <div id="narr-progress" class="narr-progress" hidden>
+          <div id="narr-progress-fill" class="narr-progress-fill"></div>
+        </div>
+        <label class="check narration-auto" title="Automatically generate narration audio when a story finishes generating">
+          <input type="checkbox" id="autoNarrate" />
+          <span>Generate audio when complete</span>
+        </label>
+        <span id="narration-status" class="narration-status" role="status"></span>
+        <audio id="narration-audio" hidden></audio>
+      </div>
       <div id="story" class="story" tabindex="0">
         <div id="empty-state" class="empty-state">
           <p>Your collaborative story will appear here, one turn at a time.</p>
