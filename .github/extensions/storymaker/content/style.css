@@ -183,6 +183,14 @@ textarea:focus, select:focus, input:focus {
 .status { font-size: 0.82rem; color: var(--text-dim); min-height: 1.1em; }
 .status.error { color: var(--danger); }
 .status.ok { color: #76d39a; }
+.status .path-link {
+  color: var(--orange-soft);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+  word-break: break-all;
+}
+.status .path-link:hover { color: var(--orange); }
 
 /* ---- Story ---- */
 .story-panel { display: flex; flex-direction: column; }
