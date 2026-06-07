@@ -885,6 +885,68 @@ async function saveAudio({ filename, key } = {}) {
     }
 }
 
+// ---- Filename suggestion -------------------------------------------------
+
+// Ask `model` (Author A's model) to invent a short title for the finished story.
+// The page slugifies the result and uses it as the default name for both the
+// .txt and the .wav files. Best-effort: returns { ok:false } on any failure so
+// the page can fall back to a model-name slug.
+async function suggestFilename({ text, model } = {}) {
+    text = String(text ?? "").trim();
+    model = String(model || "");
+    if (!text) return { ok: false, error: "There is no story to name yet." };
+    if (!model) return { ok: false, error: "No model was provided." };
+
+    const system =
+        "You create a short, evocative title for a story. Reply with ONLY the title: " +
+        "2 to 5 words, in Title Case, with no quotation marks, no trailing punctuation, " +
+        "and no extra commentary.";
+    const prompt = `Story:\n\n${text.slice(0, 6000)}\n\nTitle:`;
+
+    const call = async (think) => {
+        const body = {
+            model,
+            stream: false,
+            messages: [
+                { role: "system", content: system },
+                { role: "user", content: prompt },
+            ],
+            options: { temperature: 0.7, top_p: 0.9, num_predict: 24 },
+        };
+        if (think === false) body.think = false;
+        const res = await fetch(`${OLLAMA}/api/chat`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            signal: AbortSignal.timeout(30000),
+            body: JSON.stringify(body),
+        });
+        if (!res.ok) {
+            const t = await res.text().catch(() => "");
+            const err = new Error(`Ollama /api/chat failed (HTTP ${res.status})`);
+            err.body = t;
+            throw err;
+        }
+        return res.json();
+    };
+
+    try {
+        let data;
+        try {
+            data = await call(false);
+        } catch (err) {
+            // Some models reject the `think` flag; retry without it.
+            if (/think/i.test(err?.body || err?.message || "")) data = await call(undefined);
+            else throw err;
+        }
+        // Use the first non-empty line; ignore any `thinking` field entirely.
+        const raw = String(data?.message?.content || "");
+        const title = raw.split("\n").map((s) => s.trim()).find(Boolean) || "";
+        return { ok: true, title };
+    } catch (err) {
+        return { ok: false, error: err?.message || String(err) };
+    }
+}
+
 // ---- Wire up the webview + session --------------------------------------
 
 webview = new CopilotWebview({
@@ -933,6 +995,7 @@ webview = new CopilotWebview({
         },
         saveAudio,
         saveStory,
+        suggestFilename,
         copyStory: async ({ text } = {}) => {
             const story = String(text ?? "");
             if (!story.trim()) return { ok: false, error: "There is no story to copy yet." };

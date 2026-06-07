@@ -26,6 +26,7 @@ const els = {
   narrateStop: $("narrateStop"),
   saveAudio: $("saveAudio"),
   autoNarrate: $("autoNarrate"),
+  includeStarter: $("includeStarter"),
   progressWrap: $("narr-progress"),
   progressFill: $("narr-progress-fill"),
   narrationStatus: $("narration-status"),
@@ -69,6 +70,17 @@ function clearStory() {
 
 function assembleStory() {
   const parts = [state.starterText];
+  const indices = [...state.segments.keys()].sort((a, b) => a - b);
+  for (const i of indices) parts.push(state.segments.get(i).plain);
+  return parts.map((p) => (p || "").trim()).filter(Boolean).join("\n\n");
+}
+
+// The text to narrate. The starter is included only when the "Include starter
+// text" box is checked (default off), so by default only the authored segments
+// are read aloud.
+function narrationText() {
+  const parts = [];
+  if (els.includeStarter && els.includeStarter.checked) parts.push(state.starterText);
   const indices = [...state.segments.keys()].sort((a, b) => a - b);
   for (const i of indices) parts.push(state.segments.get(i).plain);
   return parts.map((p) => (p || "").trim()).filter(Boolean).join("\n\n");
@@ -391,23 +403,64 @@ async function weave() {
 
   // Auto-generate audio (silent) only after generation state is fully cleared,
   // so the synthesis sees state.generating === false.
-  if (autoGenerate && assembleStory()) generateNarration();
+  if (autoGenerate && narrationText()) generateNarration();
 }
 
-// Derive a safe default filename (alphanumeric + hyphens, .txt) from Author A's
-// model and prefill the filename box once there is a story to save.
-function slugifyModel(model) {
-  const slug = String(model || "")
+// Slugify arbitrary text to a safe filename stem (lowercase, alphanumeric +
+// hyphens). Returns "" if nothing usable remains.
+function slugify(text) {
+  return String(text || "")
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/-{2,}/g, "-")
     .replace(/^-+|-+$/g, "");
-  return slug || "story";
+}
+
+function slugifyModel(model) {
+  return slugify(model) || "story";
+}
+
+// Set the default filename stem shared by the .txt and .wav saves. Updates the
+// visible .txt box only if the user hasn't edited the value we last filled, so a
+// late model-generated title never clobbers a manual edit.
+function applyDefaultFilename(base) {
+  if (!base) return;
+  state.meta = state.meta || {};
+  state.meta.fileBase = base;
+  const nextTxt = base + ".txt";
+  if (!els.filename.value || els.filename.value === state.autoFilename) {
+    els.filename.value = nextTxt;
+  }
+  state.autoFilename = nextTxt;
+}
+
+// Ask Author A's model to title the story, then use the slug as the default name
+// for both the .txt and the .wav. Falls back to the model-name slug on failure.
+async function suggestAndApplyFilename() {
+  const text = assembleStory();
+  const model = state.meta?.modelA;
+  // Tie this request to the current story; if a newer weave starts before the
+  // title comes back, ignore the stale response.
+  const token = state.meta?.createdAt;
+  if (!text || !model) return;
+  let res;
+  try {
+    res = await copilot.suggestFilename({ text, model });
+  } catch {
+    res = null;
+  }
+  if (state.meta?.createdAt !== token) return; // superseded by a newer story
+  if (res && res.ok && res.title) {
+    const base = slugify(res.title).slice(0, 60).replace(/-+$/, "");
+    if (base) applyDefaultFilename(base);
+  }
 }
 
 function prefillFilename() {
   if (!assembleStory()) return;
-  els.filename.value = slugifyModel(state.meta?.modelA) + ".txt";
+  // Immediate model-name fallback, then upgrade to a model-generated title.
+  applyDefaultFilename(slugifyModel(state.meta?.modelA));
+  suggestAndApplyFilename();
 }
 
 async function stop() {
@@ -619,7 +672,7 @@ function enqueueChunk(requestId, wavBase64) {
 function narrationCacheValid() {
   return (
     narration.haveAudio &&
-    narration.cacheText === assembleStory() &&
+    narration.cacheText === narrationText() &&
     narration.cacheVoice === els.voice.value
   );
 }
@@ -627,7 +680,7 @@ function narrationCacheValid() {
 // Render the single primary button + Stop + Save + voice + progress from the
 // current phase. Labels: "Generate audio" / "Generating…" / "Play" / "Playing…".
 function updateNarrationButtons() {
-  const story = assembleStory();
+  const story = narrationText();
   const voice = els.voice.value;
   const cacheValid = narrationCacheValid();
   const phase = narration.phase;
@@ -650,6 +703,7 @@ function updateNarrationButtons() {
   els.narrateStop.hidden = idle;
   els.saveAudio.disabled = !cacheValid || !idle || narration.extBusy;
   els.voice.disabled = !idle || narration.extBusy;
+  els.includeStarter.disabled = !idle || narration.extBusy;
   els.autoNarrate.disabled = state.generating;
 }
 
@@ -714,7 +768,7 @@ function narratePrimary() {
 
 // Synthesize the current story silently (no playback) and cache the audio.
 async function generateNarration() {
-  const story = assembleStory();
+  const story = narrationText();
   const voice = els.voice.value;
   if (!story || !voice || narration.phase !== "idle" || narration.extBusy) return;
 
@@ -901,7 +955,11 @@ async function stopNarration() {
 }
 
 async function saveAudioFile() {
-  const base = slugifyModel(state.meta?.modelA);
+  // Mirror the visible .txt name so the audio file shares its stem (whether that
+  // is the model-generated title or a name the user typed), falling back to the
+  // stored base / model-name slug.
+  const typed = slugify(els.filename.value.trim().replace(/\.[a-z0-9]+$/i, ""));
+  const base = typed || state.meta?.fileBase || slugifyModel(state.meta?.modelA);
   const filename = (base || "narration") + ".wav";
   els.saveAudio.disabled = true;
   setNarrationStatus("Choose where to save the audio…");
@@ -1080,6 +1138,7 @@ els.narrate.addEventListener("click", narratePrimary);
 els.narrateStop.addEventListener("click", stopNarration);
 els.saveAudio.addEventListener("click", saveAudioFile);
 els.voice.addEventListener("change", updateNarrationButtons);
+els.includeStarter.addEventListener("change", updateNarrationButtons);
 els.autoNarrate.addEventListener("change", () => {
   copilot.setAutoNarrate({ value: els.autoNarrate.checked }).catch(() => {});
 });
