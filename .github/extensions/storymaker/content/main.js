@@ -66,7 +66,9 @@ function assembleStory() {
 
 function refreshOutputButtons() {
   const has = assembleStory().length > 0;
-  els.save.disabled = !has;
+  // Keep Save disabled while generating: the timing metadata isn't available
+  // until generateStory() returns, so a mid-flight save would lack it.
+  els.save.disabled = !has || state.generating;
   els.copy.disabled = !has;
 }
 
@@ -311,6 +313,8 @@ async function weave() {
 
   try {
     const res = await copilot.generateStory({ starter, modelA, modelB, sentences, turns, conclude, concludeMultiplier });
+    if (res && res.timing) state.meta.timing = res.timing;
+    if (res) state.meta.generationStatus = res.ok ? "complete" : res.stopped ? "stopped" : "error";
     if (res && res.ok) {
       setStatus("Story complete. You can copy or save it.", "ok");
       prefillFilename();

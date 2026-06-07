@@ -372,7 +372,7 @@ async function push(method, payload) {
 }
 
 async function generateStory({ starter, modelA, modelB, sentences, turns, conclude, concludeMultiplier }) {
-    if (busy) return { ok: false, error: "A story is already being woven." };
+    if (busy) return { ok: false, error: "A story is already being woven.", timing: null };
     busy = true;
     const abort = new AbortController();
     currentAbort = abort;
@@ -382,6 +382,26 @@ async function generateStory({ starter, modelA, modelB, sentences, turns, conclu
     turns = clampInt(turns, 1, 25, 3);
     conclude = conclude === undefined ? true : !!conclude;
     concludeMultiplier = clampInt(concludeMultiplier, 1, 4, 2);
+
+    // Generation timing, surfaced in the saved file's front matter for later
+    // analysis (model speed, effect of turn count / conclusion length on time).
+    // turnMs holds per-author durations for regular turns only; the conclusion is
+    // tracked separately so it doesn't skew the per-turn averages.
+    const genStart = Date.now();
+    const turnMs = { A: [], B: [] };
+    let concludeMs = null;
+    const avg = (a) => (a.length ? a.reduce((x, y) => x + y, 0) / a.length : null);
+    const buildTiming = () => {
+        const end = Date.now();
+        return {
+            startedAt: new Date(genStart).toISOString(),
+            endedAt: new Date(end).toISOString(),
+            totalMs: end - genStart,
+            authorA: { turns: turnMs.A.length, avgTurnMs: avg(turnMs.A) },
+            authorB: { turns: turnMs.B.length, avgTurnMs: avg(turnMs.B) },
+            concludeMs,
+        };
+    };
 
     try {
         if (!starter) throw new Error("Please provide some starter text to begin the story.");
@@ -427,6 +447,7 @@ async function generateStory({ starter, modelA, modelB, sentences, turns, conclu
                     totalTurns: turns,
                 });
 
+                const segStart = Date.now();
                 const segText = await streamSegment(
                     segIndex,
                     author.model,
@@ -434,6 +455,7 @@ async function generateStory({ starter, modelA, modelB, sentences, turns, conclu
                     buildPrompt(story, sentences),
                     sentences,
                 );
+                turnMs[author.key].push(Date.now() - segStart);
                 if (!segText) {
                     await push("onSegmentEmpty", { index: segIndex });
                 } else {
@@ -457,6 +479,7 @@ async function generateStory({ starter, modelA, modelB, sentences, turns, conclu
                 model: author.model,
             });
 
+            const segStart = Date.now();
             const segText = await streamSegment(
                 segIndex,
                 author.model,
@@ -464,6 +487,7 @@ async function generateStory({ starter, modelA, modelB, sentences, turns, conclu
                 buildConcludePrompt(story, concludeSentences),
                 concludeSentences,
             );
+            concludeMs = Date.now() - segStart;
             if (!segText) {
                 await push("onSegmentEmpty", { index: segIndex });
             } else {
@@ -473,12 +497,12 @@ async function generateStory({ starter, modelA, modelB, sentences, turns, conclu
         }
 
         await push("onComplete", {});
-        return { ok: true, fullText: story };
+        return { ok: true, fullText: story, timing: buildTiming() };
     } catch (err) {
         const stopped = abort.signal.aborted || err?.message === "__stopped__" || err?.name === "AbortError";
         const message = stopped ? "Generation stopped." : err?.message || String(err);
         await push("onError", { message, stopped });
-        return { ok: false, error: message, stopped };
+        return { ok: false, error: message, stopped, timing: buildTiming() };
     } finally {
         busy = false;
         currentAbort = null;
@@ -521,6 +545,34 @@ function buildFrontMatter(meta) {
         lines.push(`conclusion_length: ${yamlStr(`${mult}x`)}`);
         lines.push(`conclusion_sentences: ${Math.min(40, sentences * mult)}`);
     }
+
+    // Generation timing (extension-measured) for later analysis. Seconds are
+    // rounded to millisecond precision; per-author averages cover regular turns
+    // only, with the conclusion reported separately. generation_status lets
+    // analysis distinguish complete runs from stopped/error partials.
+    if (meta.generationStatus) lines.push(`generation_status: ${yamlStr(meta.generationStatus)}`);
+    const t = meta.timing;
+    if (t && typeof t === "object") {
+        const secs = (ms) => Math.round(Number(ms)) / 1000;
+        const turnCount = (v) => (Number.isFinite(Number(v)) ? Number(v) : 0);
+        if (t.startedAt) lines.push(`generation_started: ${yamlStr(t.startedAt)}`);
+        if (t.endedAt) lines.push(`generation_ended: ${yamlStr(t.endedAt)}`);
+        if (Number.isFinite(t.totalMs)) lines.push(`generation_seconds: ${secs(t.totalMs)}`);
+        if (t.authorA && typeof t.authorA === "object") {
+            lines.push(`author_a_turns: ${turnCount(t.authorA.turns)}`);
+            if (Number.isFinite(t.authorA.avgTurnMs)) {
+                lines.push(`author_a_avg_turn_seconds: ${secs(t.authorA.avgTurnMs)}`);
+            }
+        }
+        if (t.authorB && typeof t.authorB === "object") {
+            lines.push(`author_b_turns: ${turnCount(t.authorB.turns)}`);
+            if (Number.isFinite(t.authorB.avgTurnMs)) {
+                lines.push(`author_b_avg_turn_seconds: ${secs(t.authorB.avgTurnMs)}`);
+            }
+        }
+        if (Number.isFinite(t.concludeMs)) lines.push(`conclusion_seconds: ${secs(t.concludeMs)}`);
+    }
+
     lines.push(`ollama_host: ${yamlStr(OLLAMA)}`);
     lines.push("---");
     return lines.join("\n") + "\n\n";
