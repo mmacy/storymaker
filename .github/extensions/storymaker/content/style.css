@@ -128,11 +128,30 @@ textarea:focus, select:focus, input:focus {
   box-shadow: 0 0 0 3px rgba(248, 153, 28, 0.16);
 }
 
-.authors { display: grid; grid-template-columns: 1fr 1fr; gap: 0.8rem; }
-@media (max-width: 480px) { .authors { grid-template-columns: 1fr; } }
+.authors { display: grid; grid-template-columns: 1fr auto 1fr; align-items: end; gap: 0.6rem; }
+@media (max-width: 480px) { .authors { grid-template-columns: 1fr; justify-items: center; } }
+.author { width: 100%; }
 .author .dot { width: 9px; height: 9px; border-radius: 50%; display: inline-block; }
 .author-a .dot { background: var(--author-a); box-shadow: 0 0 8px rgba(248, 153, 28, 0.6); }
 .author-b .dot { background: var(--author-b); box-shadow: 0 0 8px rgba(63, 182, 201, 0.55); }
+
+/* Swap button sitting between the two author selectors. */
+.swap-models {
+  width: 40px; height: 40px; padding: 0;
+  display: inline-flex; align-items: center; justify-content: center;
+  color: var(--text-dim);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  cursor: pointer;
+  transition: color 0.15s ease, border-color 0.15s ease, background 0.15s ease, transform 0.06s ease;
+}
+.swap-models:hover:not(:disabled) {
+  color: var(--orange-soft); border-color: var(--orange); background: var(--surface);
+}
+.swap-models:active:not(:disabled) { transform: translateY(1px); }
+.swap-models:disabled { opacity: 0.4; cursor: not-allowed; }
+.swap-models svg { display: block; transition: transform 0.4s cubic-bezier(0.34, 1.56, 0.64, 1); }
 
 .numbers { display: flex; align-items: flex-end; gap: 0.8rem; flex-wrap: wrap; }
 .field.small { width: 120px; }

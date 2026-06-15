@@ -7,6 +7,7 @@ const els = {
   starter: $("starter"),
   modelA: $("modelA"),
   modelB: $("modelB"),
+  swapModels: $("swapModels"),
   sentences: $("sentences"),
   turns: $("turns"),
   concludeToggle: $("concludeToggle"),
@@ -265,6 +266,20 @@ function populateSelect(select, models, preferIndex) {
   }
 }
 
+let swapTurns = 0;
+
+// Swap the currently selected Author A and Author B models. Each click flips the
+// icon another half-turn for a tactile sense of the values exchanging.
+function swapAuthorModels() {
+  if (els.swapModels.disabled) return;
+  const a = els.modelA.value;
+  els.modelA.value = els.modelB.value;
+  els.modelB.value = a;
+  swapTurns += 1;
+  const icon = els.swapModels.querySelector("svg");
+  if (icon) icon.style.transform = `rotate(${swapTurns * 180}deg)`;
+}
+
 async function loadModels() {
   els.ollamaStatus.textContent = "Connecting…";
   els.ollamaStatus.className = "pill";
@@ -276,6 +291,7 @@ async function loadModels() {
       els.ollamaStatus.className = "pill bad";
       setStatus("No Ollama models found. Pull one with `ollama pull <model>` and reopen.", "error");
       els.weave.disabled = true;
+      els.swapModels.disabled = true;
       els.modelA.innerHTML = '<option value="">(none)</option>';
       els.modelB.innerHTML = '<option value="">(none)</option>';
       return;
@@ -285,12 +301,14 @@ async function loadModels() {
     els.ollamaStatus.textContent = `Ollama · ${res.models.length} model${res.models.length === 1 ? "" : "s"}`;
     els.ollamaStatus.className = "pill ok";
     els.weave.disabled = false;
+    els.swapModels.disabled = false;
     if (!els.status.textContent) setStatus("Ready. Enter starter text and weave a story.");
   } catch (err) {
     els.ollamaStatus.textContent = "Ollama offline";
     els.ollamaStatus.className = "pill bad";
     setStatus(String(err.message || err), "error");
     els.weave.disabled = true;
+    els.swapModels.disabled = true;
   }
 }
 
@@ -303,6 +321,7 @@ function setGenerating(on) {
   els.starter.disabled = on;
   els.modelA.disabled = on;
   els.modelB.disabled = on;
+  els.swapModels.disabled = on;
   els.sentences.disabled = on;
   els.turns.disabled = on;
   els.concludeToggle.disabled = on;
@@ -1132,6 +1151,7 @@ document.addEventListener("keydown", (e) => {
 
 els.weave.addEventListener("click", weave);
 els.stop.addEventListener("click", stop);
+els.swapModels.addEventListener("click", swapAuthorModels);
 els.copy.addEventListener("click", copyStory);
 els.save.addEventListener("click", saveStory);
 els.narrate.addEventListener("click", narratePrimary);
