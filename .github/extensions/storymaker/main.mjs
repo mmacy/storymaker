@@ -324,22 +324,29 @@ async function* streamChat({ model, system, prompt, sentences, signal }) {
 
 // ---- Prompt construction -------------------------------------------------
 
-function buildSystem(label, sentences) {
+function buildSystem(label, sentences, opening) {
     const s = sentences === 1 ? "sentence" : "sentences";
+    const tone = opening
+        ? `Take the opening at face value: the starter and the little written so far set the genre, mood, and stakes, so build a grounded continuation that matches them. If the premise reads as neutral, everyday, or open-ended, keep it that way rather than recasting it as horror, tragedy, violence, or ominous mystery. `
+        : `Keep the genre, mood, and stakes consistent with what the story has actually established, letting them develop naturally but not escalating into darker or more violent territory unless the starter or earlier text plainly set up that direction. Treat a passing moment of suspense or uncertainty as ordinary narrative texture, not a cue to turn the story dark. `;
     return (
         `You are ${label}, one of two authors co-writing a single continuous story by taking turns. ` +
         `Continue the story seamlessly from exactly where it leaves off, preserving the established characters, ` +
-        `setting, tense, point of view, and tone. Write exactly ${sentences} ${s} of vivid narrative prose, then stop. ` +
+        `setting, tense, point of view, and tone. ${tone}` +
+        `Write exactly ${sentences} ${s} of vivid, grounded narrative prose, then stop. ` +
         `Do not restate or summarize earlier text. Do not end or wrap up the story. ` +
         `Output only the continuation prose — no headings, labels, author names, lists, surrounding quotation marks, or commentary.`
     );
 }
 
-function buildPrompt(story, sentences) {
+function buildPrompt(story, sentences, opening) {
     const s = sentences === 1 ? "sentence" : "sentences";
+    const guard = opening
+        ? `Match the mood and stakes the starter sets; don't darken or dramatize a neutral premise. `
+        : `Stay in the tone and stakes already established; don't introduce an unearned dark, violent, or tragic turn. `;
     return (
         `The story so far:\n\n${story}\n\n` +
-        `Now write the next ${sentences} ${s}, continuing directly and seamlessly from the final sentence above. Prose only.`
+        `Now write the next ${sentences} ${s}, continuing directly and seamlessly from the final sentence above. ${guard}Prose only.`
     );
 }
 
@@ -347,9 +354,11 @@ function buildConcludeSystem(label, sentences) {
     const s = sentences === 1 ? "sentence" : "sentences";
     return (
         `You are ${label}, the author bringing a collaborative story to its end. ` +
-        `Write exactly ${sentences} ${s} of vivid narrative prose that conclude the story — resolving its central tension ` +
-        `and giving it a satisfying, definitive ending. Continue seamlessly from exactly where the story leaves off, ` +
-        `preserving the established characters, setting, tense, point of view, and tone. Do not restate or summarize earlier text. ` +
+        `Write exactly ${sentences} ${s} of vivid, grounded narrative prose that bring the story's main thread to a satisfying, ` +
+        `definitive close in keeping with the tone and stakes established so far. Continue seamlessly from exactly where the story ` +
+        `leaves off, preserving the established characters, setting, tense, point of view, and tone. ` +
+        `Resolve the story rather than escalate it: don't add a sudden new threat, death, betrayal, or twist just to make the ending dramatic. ` +
+        `Do not restate or summarize earlier text. ` +
         `Output only the concluding prose — no headings, labels, author names, lists, surrounding quotation marks, or commentary.`
     );
 }
@@ -359,7 +368,7 @@ function buildConcludePrompt(story, sentences) {
     return (
         `The story so far:\n\n${story}\n\n` +
         `Now write the ending: exactly ${sentences} ${s} that continue seamlessly from the final sentence above ` +
-        `and bring the story to a satisfying close. Prose only.`
+        `and bring the story to a satisfying close in keeping with its established tone, without a manufactured last-minute twist. Prose only.`
     );
 }
 
@@ -470,8 +479,8 @@ async function generateStory({ starter, modelA, modelB, sentences, turns, conclu
                 const segText = await streamSegment(
                     segIndex,
                     author.model,
-                    buildSystem(author.label, sentences),
-                    buildPrompt(story, sentences),
+                    buildSystem(author.label, sentences, turn === 1),
+                    buildPrompt(story, sentences, turn === 1),
                     sentences,
                 );
                 turnMs[author.key].push(Date.now() - segStart);
