@@ -1,0 +1,17 @@
+{
+  "name": "storymaker-standalone",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Standalone local web app for the Storymaker Copilot CLI extension.",
+  "type": "module",
+  "scripts": {
+    "start": "node server.mjs"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "@huggingface/transformers": "^3.5.1",
+    "kokoro-js": "^1.2.1"
+  }
+}

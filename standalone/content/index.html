@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Storymaker</title>
+<link rel="stylesheet" href="style.css" />
+<!-- /__bridge.js exposes window.copilot. Must load before main.js uses it. -->
+<script src="/__bridge.js"></script>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand-mark" aria-hidden="true">
+        <svg viewBox="0 0 40 40" width="34" height="34">
+          <path d="M4 26 C 10 8, 16 8, 20 20 S 30 32, 36 14" fill="none"
+                stroke="url(#smwave)" stroke-width="4" stroke-linecap="round" />
+          <defs>
+            <linearGradient id="smwave" x1="0" y1="0" x2="40" y2="0">
+              <stop offset="0" stop-color="#F8991C" />
+              <stop offset="1" stop-color="#FFB85C" />
+            </linearGradient>
+          </defs>
+        </svg>
+      </span>
+      <div class="brand-text">
+        <h1>Storymaker</h1>
+        <p>Two local minds, one collaborative story.</p>
+      </div>
+    </div>
+    <div id="ollama-status" class="pill" title="Ollama connection">Connecting…</div>
+  </header>
+
+  <main class="layout">
+    <!-- Setup panel -->
+    <section class="panel setup" aria-label="Story setup">
+      <label class="field">
+        <span class="field-label">Starter text</span>
+        <textarea id="starter" rows="4" placeholder="On the first warm morning of spring, Maya found an old bicycle leaning against her grandmother's shed…"></textarea>
+      </label>
+
+      <div class="authors">
+        <label class="field author author-a">
+          <span class="field-label"><i class="dot"></i> Author A model</span>
+          <select id="modelA"><option value="">Loading…</option></select>
+        </label>
+        <button id="swapModels" class="swap-models" type="button" disabled
+                title="Swap the Author A and Author B models" aria-label="Swap the Author A and Author B models">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor"
+               stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M4 8h13" />
+            <path d="M14 5l3 3-3 3" />
+            <path d="M20 16H7" />
+            <path d="M10 13l-3 3 3 3" />
+          </svg>
+        </button>
+        <label class="field author author-b">
+          <span class="field-label"><i class="dot"></i> Author B model</span>
+          <select id="modelB"><option value="">Loading…</option></select>
+        </label>
+      </div>
+
+      <div class="numbers">
+        <label class="field small">
+          <span class="field-label">Sentences per turn</span>
+          <input id="sentences" type="number" min="1" max="10" value="2" />
+        </label>
+        <label class="field small">
+          <span class="field-label">Number of turns</span>
+          <input id="turns" type="number" min="1" max="25" value="3" />
+        </label>
+        <div class="grow"></div>
+        <div class="actions">
+          <button id="weave" class="btn btn-primary">Weave story</button>
+          <button id="stop" class="btn btn-ghost" hidden>Stop</button>
+        </div>
+      </div>
+
+      <div class="conclude-row" id="conclude-row">
+        <label class="check">
+          <input type="checkbox" id="concludeToggle" checked />
+          <span>Let Author A write a conclusion</span>
+        </label>
+        <label class="field small conclude-len">
+          <span class="field-label">Length</span>
+          <select id="concludeMultiplier">
+            <option value="1">1×</option>
+            <option value="2" selected>2×</option>
+            <option value="3">3×</option>
+            <option value="4">4×</option>
+          </select>
+        </label>
+        <span id="conclude-hint" class="hint"></span>
+      </div>
+
+      <p id="status" class="status" role="status"></p>
+    </section>
+
+    <!-- Story output -->
+    <section class="panel story-panel" aria-label="Story">
+      <div class="story-head">
+        <h2>The story</h2>
+        <div class="story-actions">
+          <input id="filename" class="filename" type="text" placeholder="story.txt" spellcheck="false" />
+          <button id="save" class="btn btn-small" disabled>Save</button>
+          <button id="copy" class="btn btn-small" disabled>Copy</button>
+        </div>
+      </div>
+      <div class="narration-bar">
+        <span class="narration-label" aria-hidden="true">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor"
+               stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M11 5 6 9H2v6h4l5 4z" />
+            <path d="M15.5 8.5a5 5 0 0 1 0 7" />
+            <path d="M19 5a9 9 0 0 1 0 14" />
+          </svg>
+          Narration
+        </span>
+        <label class="field narration-voice">
+          <select id="voice" title="Narrator voice"><option value="">Voice…</option></select>
+        </label>
+        <button id="narrate" class="btn btn-small" disabled>Generate audio</button>
+        <button id="narrateStop" class="btn btn-small btn-ghost" hidden>Stop</button>
+        <button id="saveAudio" class="btn btn-small" disabled>Save audio</button>
+        <div id="narr-progress" class="narr-progress" hidden>
+          <div id="narr-progress-fill" class="narr-progress-fill"></div>
+        </div>
+        <label class="check narration-auto" title="Automatically generate narration audio when a story finishes generating">
+          <input type="checkbox" id="autoNarrate" />
+          <span>Generate audio when complete</span>
+        </label>
+        <label class="check narration-auto" title="Include the starter text at the start of the narrated audio">
+          <input type="checkbox" id="includeStarter" />
+          <span>Include starter text</span>
+        </label>
+        <span id="narration-status" class="narration-status" role="status"></span>
+        <audio id="narration-audio" hidden></audio>
+      </div>
+      <div id="story" class="story" tabindex="0">
+        <div id="empty-state" class="empty-state">
+          <p>Your collaborative story will appear here, one turn at a time.</p>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <script type="module" src="/main.js"></script>
+</body>
+</html>
