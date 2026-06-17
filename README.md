@@ -2,9 +2,18 @@
 
 > Two local minds, one collaborative story.
 
-Storymaker is a [GitHub Copilot CLI](https://github.com/github/copilot-cli) extension that opens a native desktop window where **two local [Ollama](https://ollama.com) models take turns writing a story**. You provide the opening line, pick a model for each author, and watch the prose stream in live as the two models hand the narrative back and forth.
+Storymaker lets **two local [Ollama](https://ollama.com) models take turns writing a story**. You provide the opening line, pick a model for each author, and watch the prose stream in live as the two models hand the narrative back and forth. The finished story can be narrated aloud with a local Kokoro text-to-speech voice.
 
 ![Storymaker in action](docs/screenshot.png)
+
+## Two ways to run it
+
+Storymaker comes in two flavors that share the same engine and UI:
+
+- **Copilot CLI extension** — opens a native desktop window from inside [GitHub Copilot CLI](https://github.com/github/copilot-cli). Lives in `.github/extensions/storymaker/`. See [Installation](#installation) below.
+- **Standalone web app** — a self-contained local server that runs in your browser with plain `node server.mjs`, no Copilot CLI needed. Lives in [`standalone/`](standalone/). See [standalone/README.md](standalone/README.md).
+
+Both produce identical results; pick whichever fits your setup. The rest of this README describes the extension.
 
 ## Features
 
@@ -118,7 +127,7 @@ Copying to the clipboard yields the plain story without front matter.
 ## Project structure
 
 ```
-.github/extensions/storymaker/
+.github/extensions/storymaker/   # the Copilot CLI extension
 ├── extension.mjs        # bootstrapper (installs deps, imports main.mjs)
 ├── main.mjs             # Ollama client + generation loop + callbacks
 ├── package.json
@@ -129,6 +138,12 @@ Copying to the clipboard yields the plain story without front matter.
     ├── index.html
     ├── style.css
     └── main.js
+
+standalone/                      # the standalone browser app
+├── server.mjs           # HTTP + SSE server with the same engine
+├── package.json
+├── README.md
+└── content/             # verbatim copy of the extension's content/
 ```
 
 See [AGENTS.md](AGENTS.md) for contributor and AI-agent guidance.

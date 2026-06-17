@@ -1,0 +1,5 @@
+node_modules/
+
+# Stories/audio saved into this directory (the native save dialog can default here).
+*.txt
+*.wav

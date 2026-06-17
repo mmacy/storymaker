@@ -54,6 +54,15 @@ Page (Chromium webview)  ──WebSocket──►  Extension (Node, main.mjs)  �
 - **Default filename:** after a story, `suggestFilename({ text, model })` asks **Author A's model** for a short title; the page slugifies it and uses it as the default stem for **both** the `.txt` box and the `.wav` save (`state.meta.fileBase`), falling back to a slug of Author A's model name if the title call fails. The visible `.txt` box is only overwritten if the user hasn't edited the last auto-filled value.
 - **No parallelization.** Concurrent `generate()` calls on one onnxruntime-node session give **zero speedup** (measured 1/2/3/4-way ≈ 20.2s, RTF ~0.50 flat on a 10-core M-series) because one inference already saturates the CPU via intra-op threads. True parallelism would need multiple model instances in workers (N× RAM, splitting the same cores) — not worth it. Latency is instead mitigated by streaming: playback/availability begins as the first sentence finishes. `saveStatePatch` serializes writes so `lastVoice`/`autoNarrate`/`lastSaveDir` can't clobber each other.
 
+## Standalone flavor (`standalone/`)
+
+There is a second flavor of the app in `standalone/` that runs as a plain local web app (`node server.mjs`) with no Copilot CLI. It is a **sibling, not a replacement** — never change behavior by editing only one flavor.
+
+- `standalone/server.mjs` is the extension's engine (the Ollama client, prompt construction, `generateStory`, `saveStory`, all of Kokoro narration, `suggestFilename`, and the `callbacks` object) lifted **verbatim**, with only the transport swapped: the native window + WebSocket bridge becomes a plain Node HTTP server, `webview.eval(...)` pushes become Server-Sent Events (`push(...)` broadcasts an `eval` frame the page runs), and `session.log(...)` becomes a local `log(...)` to stdout. Everything else — the safety guards (path sanitizing, Windows reserved names, abort controllers, `requestId` run isolation) — is identical.
+- `standalone/content/` is a **byte-for-byte copy** of the extension's `content/`. The page is transport-agnostic: it only knows `window.copilot.*` (RPC) and `window.sm.*` (pushes), both of which the standalone bridge (`/__bridge.js`, served by `server.mjs`) provides over fetch + SSE. Do not let the two `content/` directories drift — `diff -r` them.
+- Bridge-only deps (`@webviewjs/webview`, `ws`) are dropped from `standalone/package.json`; the real engine deps (`@huggingface/transformers`, `kokoro-js`) are kept.
+- When you change generation or narration logic in `main.mjs`, mirror it into `standalone/server.mjs`; when you touch `content/`, copy it across. Keeping `stdout` clean still matters in the standalone — `log()` writes the startup banner and save messages to stdout, and that's fine, but engine code must not `console.log` arbitrarily.
+
 ## Conventions / gotchas
 
 - **stdout is reserved for JSON-RPC.** Never use `console.log()` in extension code. Use `session.log(...)`.
